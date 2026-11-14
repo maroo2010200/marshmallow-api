@@ -34,13 +34,21 @@ public class BrevoEmailSender : IBrevoEmailSender
 
         var htmlContent = BuildBrandedEmailHtml(
             heading: "Welcome to Marshmallow! 🔥",
-            subtitle: "Thanks for pulling up a chair by the campfire.",
-            bodyHtml: "Click the button below to verify your email and activate your account. This link will expire in <strong>24 hours</strong>.",
-            ctaLabel: "Verify Email →",
+            subtitle: "Thanks for joining us by the campfire.",
+            bodyHtml: "Please confirm your email address to complete your Marshmallow account setup.",
+            ctaLabel: "Confirm Email",
             ctaUrl: frontendVerificationUrl,
             footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
 
-        await SendEmailAsync(email, "Verify your email on Marshmallow", htmlContent);
+        var plainTextContent = BuildPlainText(
+            heading: "Welcome to Marshmallow!",
+            subtitle: "Thanks for joining us by the campfire.",
+            bodyText: "Please confirm your email address to complete your Marshmallow account setup.",
+            ctaLabel: "Confirm Email",
+            ctaUrl: frontendVerificationUrl,
+            footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
+
+        await SendEmailAsync(email, "Welcome to Marshmallow! Confirm your email", htmlContent, plainTextContent);
     }
 
     public async Task SendPasswordResetEmailAsync(int userId, string email, string resetToken)
@@ -50,17 +58,40 @@ public class BrevoEmailSender : IBrevoEmailSender
 
         var htmlContent = BuildBrandedEmailHtml(
             heading: "Reset Your Password 🔑",
-            subtitle: "Someone requested a password reset for your Marshmallow account.",
-            bodyHtml: "If this was you, click the button below to set a new password. This link will expire in <strong>1 hour</strong>.",
-            ctaLabel: "Reset Password →",
+            subtitle: "We received a password reset request for your account.",
+            bodyHtml: "Click the button below to choose a new password for your Marshmallow account.",
+            ctaLabel: "Reset Password",
             ctaUrl: frontendResetUrl,
-            footerText: "If you didn't request this reset, you can safely ignore this email. Your campfire password will remain unchanged.");
+            footerText: "If you didn't request a password reset, you can safely ignore this email.");
 
-        await SendEmailAsync(email, "Reset your Marshmallow password", htmlContent);
+        var plainTextContent = BuildPlainText(
+            heading: "Reset Your Password",
+            subtitle: "We received a password reset request for your account.",
+            bodyText: "Click the link below to choose a new password for your Marshmallow account.",
+            ctaLabel: "Reset Password",
+            ctaUrl: frontendResetUrl,
+            footerText: "If you didn't request a password reset, you can safely ignore this email.");
+
+        await SendEmailAsync(email, "Reset your Marshmallow password", htmlContent, plainTextContent);
     }
 
     private string GetFrontendBaseUrl() =>
         _configuration["Frontend:BaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+
+    private static string BuildPlainText(
+        string heading,
+        string subtitle,
+        string bodyText,
+        string ctaLabel,
+        string ctaUrl,
+        string footerText)
+    {
+        return $"{heading}\n" +
+               $"{subtitle}\n\n" +
+               $"{bodyText}\n\n" +
+               $"{ctaLabel}: {ctaUrl}\n\n" +
+               $"{footerText}\n";
+    }
 
     private static string BuildBrandedEmailHtml(
         string heading,
@@ -106,15 +137,10 @@ public class BrevoEmailSender : IBrevoEmailSender
                                     </td>
                                 </tr>
                             </table>
-                            <!-- Fallback Link -->
-                            <div style=""margin-top: 24px; padding-top: 18px; border-top: 1px dashed #E9B97C; text-align: left;"">
-                                <p style=""color: #78350F; font-size: 12px; line-height: 1.5; margin: 0 0 6px 0;"">
-                                    If the button doesn't work, copy and paste this link into your browser:
-                                </p>
-                                <p style=""margin: 0; word-break: break-all;"">
-                                    <a href=""{ctaUrl}"" target=""_blank"" style=""color: #C96B32; font-size: 12px; text-decoration: underline;"">
-                                        {ctaUrl}
-                                    </a>
+                            <!-- Fallback Link without raw naked query tokens -->
+                            <div style=""margin-top: 24px; padding-top: 18px; border-top: 1px dashed #E9B97C; text-align: center;"">
+                                <p style=""color: #78350F; font-size: 12px; line-height: 1.5; margin: 0;"">
+                                    Button not loading? <a href=""{ctaUrl}"" target=""_blank"" style=""color: #C96B32; font-weight: 600; text-decoration: underline;"">Open confirmation link in browser</a>
                                 </p>
                             </div>
                         </td>
@@ -190,6 +216,7 @@ public class BrevoEmailSender : IBrevoEmailSender
         string toEmail,
         string subject,
         string htmlContent,
+        string plainTextContent,
         string clientId,
         string clientSecret,
         string refreshToken,
@@ -197,14 +224,35 @@ public class BrevoEmailSender : IBrevoEmailSender
     {
         var accessToken = await GetGmailAccessTokenAsync(clientId, clientSecret, refreshToken);
 
-        var rfc822 = $"From: Marshmallow <{senderEmail}>\r\n" +
-                     $"To: {toEmail}\r\n" +
-                     $"Subject: {subject}\r\n" +
-                     "MIME-Version: 1.0\r\n" +
-                     "Content-Type: text/html; charset=utf-8\r\n\r\n" +
-                     htmlContent;
+        var boundary = "----=_Part_" + Guid.NewGuid().ToString("N");
+        var dateHeader = DateTime.UtcNow.ToString("r");
+        var messageId = $"<{Guid.NewGuid():N}.{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}@{senderEmail.Split('@')[1]}>";
 
-        var rawBytes = Encoding.UTF8.GetBytes(rfc822);
+        var sb = new StringBuilder();
+        sb.Append($"From: Marshmallow <{senderEmail}>\r\n");
+        sb.Append($"To: {toEmail}\r\n");
+        sb.Append($"Subject: {subject}\r\n");
+        sb.Append($"Date: {dateHeader}\r\n");
+        sb.Append($"Message-ID: {messageId}\r\n");
+        sb.Append("MIME-Version: 1.0\r\n");
+        sb.Append("X-Mailer: Marshmallow Mailer\r\n");
+        sb.Append($"Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n");
+
+        // Part 1: Plain-Text (RFC standard for anti-spam deliverability)
+        sb.Append($"--{boundary}\r\n");
+        sb.Append("Content-Type: text/plain; charset=utf-8\r\n");
+        sb.Append("Content-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(plainTextContent + "\r\n\r\n");
+
+        // Part 2: HTML
+        sb.Append($"--{boundary}\r\n");
+        sb.Append("Content-Type: text/html; charset=utf-8\r\n");
+        sb.Append("Content-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(htmlContent + "\r\n\r\n");
+
+        sb.Append($"--{boundary}--\r\n");
+
+        var rawBytes = Encoding.UTF8.GetBytes(sb.ToString());
         var base64Url = Convert.ToBase64String(rawBytes)
             .Replace('+', '-')
             .Replace('/', '_')
@@ -224,15 +272,30 @@ public class BrevoEmailSender : IBrevoEmailSender
             throw new InvalidOperationException($"Gmail API error ({response.StatusCode}): {err}");
         }
 
-        _logger.LogInformation("Email successfully delivered to {Email} via Google Gmail REST API (Primary Inbox guaranteed).", toEmail);
+        _logger.LogInformation("Email successfully delivered to {Email} via Google Gmail REST API.", toEmail);
     }
 
-    private async Task SendEmailAsync(string toEmail, string subject, string htmlContent)
+    private async Task SendEmailAsync(string toEmail, string subject, string htmlContent, string plainTextContent)
     {
-        var gmailClientId = _configuration["Gmail:ClientId"];
-        var gmailClientSecret = _configuration["Gmail:ClientSecret"];
-        var gmailRefreshToken = _configuration["Gmail:RefreshToken"];
-        var gmailSenderEmail = _configuration["Gmail:SenderEmail"] ?? "maroo30303030@gmail.com";
+        var gmailClientId = _configuration["Gmail:ClientId"]
+            ?? _configuration["Gmail__ClientId"]
+            ?? Environment.GetEnvironmentVariable("Gmail__ClientId")
+            ?? Environment.GetEnvironmentVariable("Gmail:ClientId");
+
+        var gmailClientSecret = _configuration["Gmail:ClientSecret"]
+            ?? _configuration["Gmail__ClientSecret"]
+            ?? Environment.GetEnvironmentVariable("Gmail__ClientSecret")
+            ?? Environment.GetEnvironmentVariable("Gmail:ClientSecret");
+
+        var gmailRefreshToken = _configuration["Gmail:RefreshToken"]
+            ?? _configuration["Gmail__RefreshToken"]
+            ?? Environment.GetEnvironmentVariable("Gmail__RefreshToken")
+            ?? Environment.GetEnvironmentVariable("Gmail:RefreshToken");
+
+        var gmailSenderEmail = _configuration["Gmail:SenderEmail"]
+            ?? _configuration["Gmail__SenderEmail"]
+            ?? Environment.GetEnvironmentVariable("Gmail__SenderEmail")
+            ?? "maroo30303030@gmail.com";
 
         // Priority 1: Google Gmail REST API (HTTPS port 443 -> Works on Render Free Tier + Lands 100% in Primary Inbox)
         if (!string.IsNullOrWhiteSpace(gmailClientId) &&
@@ -242,7 +305,7 @@ public class BrevoEmailSender : IBrevoEmailSender
             try
             {
                 _logger.LogInformation("Dispatching email to {Email} via Google Gmail REST API (Port 443)...", toEmail);
-                await SendViaGmailApiAsync(toEmail, subject, htmlContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail);
+                await SendViaGmailApiAsync(toEmail, subject, htmlContent, plainTextContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail);
                 return;
             }
             catch (Exception ex)
@@ -283,6 +346,9 @@ public class BrevoEmailSender : IBrevoEmailSender
                     IsBodyHtml = true
                 };
                 mail.To.Add(toEmail);
+
+                mail.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(plainTextContent, Encoding.UTF8, "text/plain"));
+                mail.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(htmlContent, Encoding.UTF8, "text/html"));
 
                 await client.SendMailAsync(mail).WaitAsync(TimeSpan.FromSeconds(5));
                 _logger.LogInformation("Email successfully delivered to {Email} via Google SMTP.", toEmail);
