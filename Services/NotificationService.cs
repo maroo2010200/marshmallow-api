@@ -144,4 +144,77 @@ public class NotificationService(
             _logger.LogError(ex, "Failed to delete notification {Type} for user {RecipientId}", type, recipientUserId);
         }
     }
+
+    public async Task DeleteCommentNotificationsAsync(int commentId)
+    {
+        try
+        {
+            var commentIds = await _dbContext.Comments
+                .Where(c => c.Id == commentId || c.ParentCommentId == commentId)
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            if (commentIds.Count == 0) return;
+
+            var notifications = await _dbContext.Notifications
+                .Where(n => n.TargetCommentId.HasValue && commentIds.Contains(n.TargetCommentId.Value))
+                .ToListAsync();
+
+            if (notifications.Count == 0) return;
+
+            _dbContext.Notifications.RemoveRange(notifications);
+            await _dbContext.SaveChangesAsync();
+
+            var notificationsByRecipient = notifications.GroupBy(n => n.RecipientUserId);
+            foreach (var group in notificationsByRecipient)
+            {
+                var recipientId = group.Key;
+                var unreadCount = await _dbContext.Notifications
+                    .CountAsync(n => n.RecipientUserId == recipientId && !n.IsRead);
+
+                foreach (var notification in group)
+                {
+                    await _hubContext.Clients.User(recipientId.ToString())
+                        .SendAsync("NotificationDeleted", notification.Id, unreadCount);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete notifications for comment {CommentId}", commentId);
+        }
+    }
+
+    public async Task DeletePostNotificationsAsync(int postId)
+    {
+        try
+        {
+            var notifications = await _dbContext.Notifications
+                .Where(n => n.TargetPostId == postId)
+                .ToListAsync();
+
+            if (notifications.Count == 0) return;
+
+            _dbContext.Notifications.RemoveRange(notifications);
+            await _dbContext.SaveChangesAsync();
+
+            var notificationsByRecipient = notifications.GroupBy(n => n.RecipientUserId);
+            foreach (var group in notificationsByRecipient)
+            {
+                var recipientId = group.Key;
+                var unreadCount = await _dbContext.Notifications
+                    .CountAsync(n => n.RecipientUserId == recipientId && !n.IsRead);
+
+                foreach (var notification in group)
+                {
+                    await _hubContext.Clients.User(recipientId.ToString())
+                        .SendAsync("NotificationDeleted", notification.Id, unreadCount);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete notifications for post {PostId}", postId);
+        }
+    }
 }
