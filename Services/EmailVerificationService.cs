@@ -28,11 +28,11 @@ public class EmailVerificationService(AppDbContext dbContext, IBrevoEmailSender 
         return token;
     }
 
-    public async Task SendVerificationEmailAsync(int userId, string email, string token)
+    public async Task SendVerificationEmailAsync(int userId, string email, string token, string? recipientName = null)
     {
         try
         {
-            await _brevoEmailSender.SendVerificationEmailAsync(userId, email, token);
+            await _brevoEmailSender.SendVerificationEmailAsync(userId, email, token, recipientName);
             _logger.LogInformation(
                 "Verification email sent to {Email} for user {UserId}",
                 email, userId);
@@ -79,7 +79,7 @@ public class EmailVerificationService(AppDbContext dbContext, IBrevoEmailSender 
         // Clean up old tokens and generate new one
         var tokenResult = await GenerateTokenAsync(userId);
 
-        await SendVerificationEmailAsync(userId, email, tokenResult);
+        await SendVerificationEmailAsync(userId, email, tokenResult, user.Name);
 
         return (true, tokenResult, "Verification email resent successfully.");
     }

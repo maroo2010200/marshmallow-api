@@ -91,6 +91,7 @@ public class AuthController(
 
         var userId = user.Id;
         var userEmail = user.Email;
+        var userName = user.Name;
 
         // Dispatch verification email in the background so registration completes in < 150ms
         _ = Task.Run(async () =>
@@ -99,7 +100,7 @@ public class AuthController(
             {
                 using var scope = _scopeFactory.CreateScope();
                 var emailService = scope.ServiceProvider.GetRequiredService<IEmailVerificationService>();
-                await emailService.SendVerificationEmailAsync(userId, userEmail, verificationToken);
+                await emailService.SendVerificationEmailAsync(userId, userEmail, verificationToken, userName);
             }
             catch (Exception ex)
             {
@@ -260,6 +261,7 @@ public class AuthController(
         var userId = user.Id;
         var userEmail = user.Email;
         var username = user.Username;
+        var userName = user.Name;
 
         // Dispatch password reset email in the background so request completes instantly
         _ = Task.Run(async () =>
@@ -268,7 +270,7 @@ public class AuthController(
             {
                 using var scope = _scopeFactory.CreateScope();
                 var emailSender = scope.ServiceProvider.GetRequiredService<IBrevoEmailSender>();
-                await emailSender.SendPasswordResetEmailAsync(userId, userEmail, token);
+                await emailSender.SendPasswordResetEmailAsync(userId, userEmail, token, userName);
                 _logger.LogUserAction("PasswordResetRequested", userId, username, "User", userId);
             }
             catch (Exception ex)

@@ -27,39 +27,69 @@ public class BrevoEmailSender : IBrevoEmailSender
         _logger = logger;
     }
 
-    public async Task SendVerificationEmailAsync(int userId, string email, string verificationToken)
+    public async Task SendVerificationEmailAsync(int userId, string email, string verificationToken, string? recipientName = null)
     {
         var encodedToken = Uri.EscapeDataString(verificationToken);
         var frontendVerificationUrl = $"{GetFrontendBaseUrl()}/verify?token={encodedToken}";
 
+        var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : null;
+        var subject = greetingName != null
+            ? $"{greetingName}, confirm your Marshmallow account 🔥"
+            : "Welcome to Marshmallow! Confirm your email";
+
+        var heading = greetingName != null
+            ? $"Welcome, {greetingName}! 🔥"
+            : "Welcome to Marshmallow! 🔥";
+
+        var bodyHtml = greetingName != null
+            ? $"Hi {greetingName},<br><br>Thanks for joining us! Please confirm your email address to complete your Marshmallow account setup."
+            : "Please confirm your email address to complete your Marshmallow account setup.";
+
+        var bodyText = greetingName != null
+            ? $"Hi {greetingName},\n\nThanks for joining us! Please confirm your email address to complete your Marshmallow account setup."
+            : "Please confirm your email address to complete your Marshmallow account setup.";
+
         var htmlContent = BuildBrandedEmailHtml(
-            heading: "Welcome to Marshmallow! 🔥",
+            heading: heading,
             subtitle: "Thanks for joining us by the campfire.",
-            bodyHtml: "Please confirm your email address to complete your Marshmallow account setup.",
+            bodyHtml: bodyHtml,
             ctaLabel: "Confirm Email",
             ctaUrl: frontendVerificationUrl,
             footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
 
         var plainTextContent = BuildPlainText(
-            heading: "Welcome to Marshmallow!",
+            heading: greetingName != null ? $"Welcome, {greetingName}!" : "Welcome to Marshmallow!",
             subtitle: "Thanks for joining us by the campfire.",
-            bodyText: "Please confirm your email address to complete your Marshmallow account setup.",
+            bodyText: bodyText,
             ctaLabel: "Confirm Email",
             ctaUrl: frontendVerificationUrl,
             footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
 
-        await SendEmailAsync(email, "Welcome to Marshmallow! Confirm your email", htmlContent, plainTextContent);
+        await SendEmailAsync(email, subject, htmlContent, plainTextContent);
     }
 
-    public async Task SendPasswordResetEmailAsync(int userId, string email, string resetToken)
+    public async Task SendPasswordResetEmailAsync(int userId, string email, string resetToken, string? recipientName = null)
     {
         var encodedToken = Uri.EscapeDataString(resetToken);
         var frontendResetUrl = $"{GetFrontendBaseUrl()}/reset-password?token={encodedToken}";
 
+        var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : null;
+        var subject = greetingName != null
+            ? $"{greetingName}, reset your Marshmallow password"
+            : "Reset your Marshmallow password";
+
+        var bodyHtml = greetingName != null
+            ? $"Hi {greetingName},<br><br>Click the button below to choose a new password for your Marshmallow account."
+            : "Click the button below to choose a new password for your Marshmallow account.";
+
+        var bodyText = greetingName != null
+            ? $"Hi {greetingName},\n\nClick the link below to choose a new password for your Marshmallow account."
+            : "Click the link below to choose a new password for your Marshmallow account.";
+
         var htmlContent = BuildBrandedEmailHtml(
             heading: "Reset Your Password 🔑",
             subtitle: "We received a password reset request for your account.",
-            bodyHtml: "Click the button below to choose a new password for your Marshmallow account.",
+            bodyHtml: bodyHtml,
             ctaLabel: "Reset Password",
             ctaUrl: frontendResetUrl,
             footerText: "If you didn't request a password reset, you can safely ignore this email.");
@@ -67,12 +97,12 @@ public class BrevoEmailSender : IBrevoEmailSender
         var plainTextContent = BuildPlainText(
             heading: "Reset Your Password",
             subtitle: "We received a password reset request for your account.",
-            bodyText: "Click the link below to choose a new password for your Marshmallow account.",
+            bodyText: bodyText,
             ctaLabel: "Reset Password",
             ctaUrl: frontendResetUrl,
             footerText: "If you didn't request a password reset, you can safely ignore this email.");
 
-        await SendEmailAsync(email, "Reset your Marshmallow password", htmlContent, plainTextContent);
+        await SendEmailAsync(email, subject, htmlContent, plainTextContent);
     }
 
     private string GetFrontendBaseUrl() =>
