@@ -2,6 +2,7 @@ using MarbookApi.Extensions;
 using MarbookApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace MarbookApi.Controllers;
 
@@ -30,6 +31,7 @@ public class MediaController : ControllerBase
 
     [HttpPost("upload")]
     [Consumes("multipart/form-data")]
+    [EnableRateLimiting("upload-policy")]
     public async Task<IActionResult> Upload(IFormFile? file, [FromQuery] string type = "posts")
     {
         if (file == null || file.Length == 0)

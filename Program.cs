@@ -10,6 +10,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using System.Reflection.Metadata;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -144,12 +145,10 @@ builder.Services.AddRateLimiter(options =>
         }, cancellationToken: token);
     };
 
-    // Policy 1: Auth endpoints - 10 requests / 1 min per IP (Brute-force & email quota protection)
+    // Policy 1: Auth endpoints - 10 requests / 1 min per IP (Brute-force & credential stuffing protection)
     options.AddPolicy("auth-policy", httpContext =>
     {
-        var clientIp = httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault()
-            ?? "unknown_ip";
+        var clientIp = GetClientIpAddress(httpContext);
 
         return RateLimitPartition.GetFixedWindowLimiter(clientIp, _ => new FixedWindowRateLimiterOptions
         {
@@ -164,8 +163,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("chat-policy", httpContext =>
     {
         var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? "anonymous";
+            ?? GetClientIpAddress(httpContext);
 
         return RateLimitPartition.GetTokenBucketLimiter(userId, _ => new TokenBucketRateLimiterOptions
         {
@@ -182,8 +180,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("post-policy", httpContext =>
     {
         var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? "anonymous";
+            ?? GetClientIpAddress(httpContext);
 
         return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
         {
@@ -195,12 +192,10 @@ builder.Services.AddRateLimiter(options =>
         });
     });
 
-    // Policy 4: Password reset requests - Max 3 requests / 5 mins per IP (Brevo quota & email flood protection)
+    // Policy 4: Password reset requests - Max 3 requests / 5 mins per IP (Email flood & user enumeration protection)
     options.AddPolicy("password-reset-policy", httpContext =>
     {
-        var clientIp = httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault()
-            ?? "unknown_ip";
+        var clientIp = GetClientIpAddress(httpContext);
 
         return RateLimitPartition.GetFixedWindowLimiter(clientIp, _ => new FixedWindowRateLimiterOptions
         {
@@ -210,6 +205,59 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0
         });
     });
+
+    // Policy 5: Resend verification email - Max 2 requests / 5 mins per IP (Gmail API quota drain protection)
+    options.AddPolicy("resend-verification-policy", httpContext =>
+    {
+        var clientIp = GetClientIpAddress(httpContext);
+
+        return RateLimitPartition.GetFixedWindowLimiter(clientIp, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 2,
+            Window = TimeSpan.FromMinutes(5),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        });
+    });
+
+    // Policy 6: Media uploads - Max 10 uploads / 1 min per User ID (Cloudinary & server storage protection)
+    options.AddPolicy("upload-policy", httpContext =>
+    {
+        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? GetClientIpAddress(httpContext);
+
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            SegmentsPerWindow = 3,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        });
+    });
+
+    // Policy 7: Comments & Replies - Max 10 comments / 1 min per User ID (Spam & database flood protection)
+    options.AddPolicy("comment-policy", httpContext =>
+    {
+        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? GetClientIpAddress(httpContext);
+
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            SegmentsPerWindow = 3,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        });
+    });
+});
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
 });
 
 builder.Services.AddScoped<IJwtService, JwtService>();
@@ -261,6 +309,8 @@ builder.Services.AddHybridCache(options =>
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -289,3 +339,24 @@ app.MapHub<NotificationHub>("/hubs/notifications");
 app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();
+
+static string GetClientIpAddress(HttpContext httpContext)
+{
+    var forwardedFor = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(forwardedFor))
+    {
+        var clientIp = forwardedFor.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(clientIp))
+        {
+            return clientIp;
+        }
+    }
+
+    var realIp = httpContext.Request.Headers["X-Real-IP"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(realIp))
+    {
+        return realIp.Trim();
+    }
+
+    return httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown_ip";
+}
