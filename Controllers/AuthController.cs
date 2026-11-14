@@ -182,6 +182,7 @@ public class AuthController(
     }
 
     [HttpPost("resend-verification")]
+    [EnableRateLimiting("resend-verification-policy")]
     public async Task<ActionResult> ResendVerificationEmail([FromQuery] string email)
     {
         if (string.IsNullOrWhiteSpace(email))

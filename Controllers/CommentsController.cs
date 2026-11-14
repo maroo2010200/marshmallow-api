@@ -8,6 +8,7 @@ using MarbookApi.Models;
 using MarbookApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
@@ -73,6 +74,7 @@ namespace MarbookApi.Controllers
         }
 
         [HttpPost]
+        [EnableRateLimiting("comment-policy")]
         public async Task<ActionResult<CommentResponseDto>> CreateComment(int postId, CommentCreateDto commentCreateDto)
         {
             if (string.IsNullOrWhiteSpace(commentCreateDto.Content) && string.IsNullOrWhiteSpace(commentCreateDto.ImageUrl))
@@ -231,6 +233,7 @@ namespace MarbookApi.Controllers
         }
 
         [HttpPost("/api/comments/{commentId:int}/Replies")]
+        [EnableRateLimiting("comment-policy")]
         public async Task<ActionResult<CommentResponseDto>> CreateReply(int commentId, CommentCreateDto replyDto)
         {
             if (string.IsNullOrWhiteSpace(replyDto.Content) && string.IsNullOrWhiteSpace(replyDto.ImageUrl))
