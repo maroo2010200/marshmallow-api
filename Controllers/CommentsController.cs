@@ -421,6 +421,8 @@ namespace MarbookApi.Controllers
                 return Forbid();
             }
 
+            await _notificationService.DeleteCommentNotificationsAsync(commentId);
+
             _dbContext.Comments.Remove(comment);
             await _dbContext.SaveChangesAsync();
 

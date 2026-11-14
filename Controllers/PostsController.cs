@@ -833,6 +833,8 @@ namespace MarbookApi.Controllers
                 .Select(p => p.Id)
                 .ToListAsync();
 
+            await _notificationService.DeletePostNotificationsAsync(id);
+
             _dbContext.Posts.Remove(post);
             await _dbContext.SaveChangesAsync();
 

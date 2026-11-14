@@ -17,4 +17,8 @@ public interface INotificationService
         NotificationType type,
         int? targetPostId = null,
         int? targetCommentId = null);
+
+    Task DeleteCommentNotificationsAsync(int commentId);
+
+    Task DeletePostNotificationsAsync(int postId);
 }
