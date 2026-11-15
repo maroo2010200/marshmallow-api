@@ -12,10 +12,15 @@ namespace MarbookApi.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class UsersController(AppDbContext dbContext, HybridCache cache, ILogger<UsersController> logger) : ControllerBase
+    public class UsersController(
+        AppDbContext dbContext,
+        HybridCache cache,
+        IServiceScopeFactory scopeFactory,
+        ILogger<UsersController> logger) : ControllerBase
     {
         private readonly AppDbContext _dbContext = dbContext;
         private readonly HybridCache _cache = cache;
+        private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
         private readonly ILogger _logger = logger;
 
         [HttpGet("me")]
@@ -271,13 +276,66 @@ namespace MarbookApi.Controllers
                 return BadRequest(new { message = "Current password is incorrect." });
             }
 
+            var otpCacheKey = $"pwd-change-otp-{userId}";
+
+            // Step 1: If no verification code is provided, generate 6-digit OTP and send via email
+            if (string.IsNullOrWhiteSpace(dto.Code))
+            {
+                var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+
+                await _cache.SetAsync(
+                    otpCacheKey,
+                    code,
+                    new HybridCacheEntryOptions { Expiration = TimeSpan.FromMinutes(15) },
+                    tags: [$"pwd-otp-{userId}"]
+                );
+
+                var userEmail = user.Email;
+                var userName = user.Name;
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var emailSender = scope.ServiceProvider.GetRequiredService<IBrevoEmailSender>();
+                        await emailSender.SendPasswordChangeOtpEmailAsync(userId, userEmail, code, userName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send password change security code to {Email}", userEmail);
+                    }
+                });
+
+                return Ok(new
+                {
+                    requiresOtp = true,
+                    message = "A 6-digit verification code has been sent to your email to confirm this change."
+                });
+            }
+
+            // Step 2: Verification code provided - validate it
+            var cachedCode = await _cache.GetOrCreateAsync<string?>(
+                otpCacheKey,
+                _ => ValueTask.FromResult<string?>(null)
+            );
+
+            if (string.IsNullOrWhiteSpace(cachedCode) || cachedCode.Trim() != dto.Code.Trim())
+            {
+                _logger.LogSecurityWarning("PasswordChangeInvalidOtp", userId, user.Username, "User", userId, "Invalid or expired OTP code");
+                return BadRequest(new { message = "Invalid or expired verification code." });
+            }
+
+            // Code is valid: clear the cached OTP
+            await _cache.RemoveByTagAsync($"pwd-otp-{userId}");
+
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
             user.UpdatedAt = DateTime.UtcNow;
 
             await _dbContext.SaveChangesAsync();
             await _cache.RemoveByTagAsync($"user-{userId}");
 
-            _logger.LogUserAction("PasswordChanged", userId, user.Username, "User", userId);
+            _logger.LogUserAction("PasswordChangedWithOtp", userId, user.Username, "User", userId);
 
             return Ok(new { message = "Password changed successfully." });
         }
