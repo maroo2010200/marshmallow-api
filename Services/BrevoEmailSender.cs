@@ -89,6 +89,37 @@ public class BrevoEmailSender : IBrevoEmailSender
         await SendEmailAsync(email, subject, htmlContent, plainTextContent, greetingName, ["password-reset"]);
     }
 
+    public async Task SendPasswordChangeOtpEmailAsync(int userId, string email, string code, string? recipientName = null)
+    {
+        var cleanCode = code.Trim();
+        var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : "there";
+        var subject = $"{cleanCode} is your Marshmallow security code";
+
+        var bodyText = $"Hi {greetingName},\n\n" +
+                       $"We received a request to change the password for your Marshmallow account.\n\n" +
+                       $"Your verification code is:\n\n" +
+                       $"{cleanCode}\n\n" +
+                       $"Enter this code on the screen to confirm your new password. It will expire in 15 minutes.\n\n" +
+                       $"If you did not request this change, please change your password immediately or contact support.\n";
+
+        var htmlContent = $@"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"">
+</head>
+<body style=""font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #222222; font-size: 15px; line-height: 1.6; padding: 16px;"">
+    <p>Hi {greetingName},</p>
+    <p>We received a request to change your Marshmallow account password.</p>
+    <p>Your verification code is:</p>
+    <p style=""font-size: 32px; font-weight: bold; letter-spacing: 6px; font-family: monospace; color: #111111; margin: 20px 0;"">{cleanCode}</p>
+    <p>Enter this code on the screen to confirm your new password. It will expire in 15 minutes.</p>
+    <p style=""color: #777777; font-size: 13px; margin-top: 32px;"">If you didn't request this change, please secure your account immediately.</p>
+</body>
+</html>";
+
+        await SendEmailAsync(email, subject, htmlContent, bodyText, recipientName, ["security-otp"]);
+    }
+
     private string GetFrontendBaseUrl()
     {
         var configured = _configuration["Frontend:BaseUrl"]
