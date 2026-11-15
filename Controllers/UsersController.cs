@@ -307,10 +307,10 @@ namespace MarbookApi.Controllers
                     }
                 });
 
-                return Ok(new
+                return Ok(new ChangePasswordResponseDto
                 {
-                    requiresOtp = true,
-                    message = "A 6-digit verification code has been sent to your email to confirm this change."
+                    RequiresOtp = true,
+                    Message = "A 6-digit verification code has been sent to your email to confirm this change."
                 });
             }
 
@@ -337,7 +337,11 @@ namespace MarbookApi.Controllers
 
             _logger.LogUserAction("PasswordChangedWithOtp", userId, user.Username, "User", userId);
 
-            return Ok(new { message = "Password changed successfully." });
+            return Ok(new ChangePasswordResponseDto
+            {
+                RequiresOtp = false,
+                Message = "Password changed successfully."
+            });
         }
 
         [HttpPost("delete-account")]
