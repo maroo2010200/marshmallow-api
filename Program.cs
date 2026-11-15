@@ -206,7 +206,7 @@ builder.Services.AddRateLimiter(options =>
         });
     });
 
-    // Policy 5: Resend verification email - Max 2 requests / 5 mins per IP (Gmail API quota drain protection)
+    // Policy 5: Resend verification email - Max 2 requests / 5 mins per IP (Transactional email quota drain protection)
     options.AddPolicy("resend-verification-policy", httpContext =>
     {
         var clientIp = GetClientIpAddress(httpContext);

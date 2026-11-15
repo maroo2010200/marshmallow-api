@@ -1,17 +1,9 @@
-using System.Net;
-using System.Net.Mail;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 
 public class BrevoEmailSender : IBrevoEmailSender
 {
     private const string BrevoEndpoint = "https://api.brevo.com/v3/smtp/email";
-
-    private static string? _cachedAccessToken;
-    private static DateTime _tokenExpiry = DateTime.MinValue;
-    private static readonly SemaphoreSlim _tokenLock = new(1, 1);
 
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
@@ -29,43 +21,46 @@ public class BrevoEmailSender : IBrevoEmailSender
 
     public async Task SendVerificationEmailAsync(int userId, string email, string verificationToken, string? recipientName = null)
     {
-        var encodedToken = Uri.EscapeDataString(verificationToken);
-        var frontendVerificationUrl = $"{GetFrontendBaseUrl()}/verify?token={encodedToken}";
+        var code = verificationToken.Trim();
+        var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : "there";
+        var subject = $"{code} is your Marshmallow verification code";
 
-        var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : null;
-        var subject = greetingName != null
-            ? $"{greetingName}, please confirm your Marshmallow account"
-            : "Confirm your Marshmallow account";
+        var bodyText = $"Hi {greetingName},\n\n" +
+                       $"Your Marshmallow verification code is:\n\n" +
+                       $"{code}\n\n" +
+                       $"Enter this 6-digit code on the verification screen to activate your account.\n" +
+                       $"This code will expire in 15 minutes.\n\n" +
+                       $"If you didn't request this code, you can safely ignore this email.\n";
 
-        var heading = greetingName != null
-            ? $"Welcome, {greetingName}!"
-            : "Welcome to Marshmallow!";
+        var htmlContent = $@"<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>{code} is your Marshmallow verification code</title>
+</head>
+<body style=""margin: 0; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #FAFAFA; color: #111827;"">
+    <div style=""max-width: 460px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 32px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"">
+        <h2 style=""margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #111827;"">Confirm your email address</h2>
+        <p style=""margin: 0 0 24px; font-size: 15px; line-height: 1.5; color: #374151;"">
+            Hi {greetingName},<br><br>
+            Please enter the following 6-digit verification code to complete your Marshmallow registration:
+        </p>
+        <div style=""background-color: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px; padding: 20px; text-align: center; margin: 0 0 24px;"">
+            <span style=""font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #111827;"">{code}</span>
+        </div>
+        <p style=""margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: #6B7280;"">
+            This code expires in 15 minutes. Never share this code with anyone.
+        </p>
+        <hr style=""border: none; border-top: 1px solid #E5E7EB; margin: 24px 0 16px;"" />
+        <p style=""margin: 0; font-size: 12px; line-height: 1.4; color: #9CA3AF;"">
+            If you didn't request a verification code, you can safely ignore this email.
+        </p>
+    </div>
+</body>
+</html>";
 
-        var bodyHtml = greetingName != null
-            ? $"Hi {greetingName},<br><br>Thanks for joining us! Please confirm your email address to complete your Marshmallow account setup."
-            : "Please confirm your email address to complete your Marshmallow account setup.";
-
-        var bodyText = greetingName != null
-            ? $"Hi {greetingName},\n\nThanks for joining us! Please confirm your email address to complete your Marshmallow account setup."
-            : "Please confirm your email address to complete your Marshmallow account setup.";
-
-        var htmlContent = BuildBrandedEmailHtml(
-            heading: heading,
-            subtitle: "Thanks for joining us by the campfire.",
-            bodyHtml: bodyHtml,
-            ctaLabel: "Confirm Email",
-            ctaUrl: frontendVerificationUrl,
-            footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
-
-        var plainTextContent = BuildPlainText(
-            heading: greetingName != null ? $"Welcome, {greetingName}!" : "Welcome to Marshmallow!",
-            subtitle: "Thanks for joining us by the campfire.",
-            bodyText: bodyText,
-            ctaLabel: "Confirm Email",
-            ctaUrl: frontendVerificationUrl,
-            footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
-
-        await SendEmailAsync(email, subject, htmlContent, plainTextContent, greetingName);
+        await SendEmailAsync(email, subject, htmlContent, bodyText, recipientName, ["otp-verification"]);
     }
 
     public async Task SendPasswordResetEmailAsync(int userId, string email, string resetToken, string? recipientName = null)
@@ -102,7 +97,7 @@ public class BrevoEmailSender : IBrevoEmailSender
             ctaUrl: frontendResetUrl,
             footerText: "If you didn't request a password reset, you can safely ignore this email.");
 
-        await SendEmailAsync(email, subject, htmlContent, plainTextContent, greetingName);
+        await SendEmailAsync(email, subject, htmlContent, plainTextContent, greetingName, ["password-reset"]);
     }
 
     private string GetFrontendBaseUrl()
@@ -203,236 +198,42 @@ public class BrevoEmailSender : IBrevoEmailSender
 </html>";
     }
 
-    private async Task<string> GetGmailAccessTokenAsync(string clientId, string clientSecret, string refreshToken)
-    {
-        if (!string.IsNullOrWhiteSpace(_cachedAccessToken) && DateTime.UtcNow < _tokenExpiry)
-        {
-            return _cachedAccessToken;
-        }
-
-        await _tokenLock.WaitAsync();
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(_cachedAccessToken) && DateTime.UtcNow < _tokenExpiry)
-            {
-                return _cachedAccessToken;
-            }
-
-            using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "https://oauth2.googleapis.com/token")
-            {
-                Content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["client_id"] = clientId,
-                    ["client_secret"] = clientSecret,
-                    ["refresh_token"] = refreshToken,
-                    ["grant_type"] = "refresh_token"
-                })
-            };
-
-            using var response = await _httpClient.SendAsync(tokenRequest);
-            var responseJson = await response.Content.ReadAsStringAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new InvalidOperationException($"Failed to refresh Gmail access token: {responseJson}");
-            }
-
-            using var doc = JsonDocument.Parse(responseJson);
-            var accessToken = doc.RootElement.GetProperty("access_token").GetString()
-                ?? throw new InvalidOperationException("access_token was null in Google OAuth response.");
-
-            var expiresIn = doc.RootElement.TryGetProperty("expires_in", out var expProp) ? expProp.GetInt32() : 3600;
-
-            _cachedAccessToken = accessToken;
-            _tokenExpiry = DateTime.UtcNow.AddSeconds(Math.Max(60, expiresIn - 120));
-
-            return accessToken;
-        }
-        finally
-        {
-            _tokenLock.Release();
-        }
-    }
-
-    private static string EncodeHeaderValue(string value)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        if (value.All(c => c <= 127)) return value;
-        var bytes = Encoding.UTF8.GetBytes(value);
-        return $"=?utf-8?B?{Convert.ToBase64String(bytes)}?=";
-    }
-
-    private async Task SendViaGmailApiAsync(
+    private async Task SendEmailAsync(
         string toEmail,
         string subject,
         string htmlContent,
         string plainTextContent,
-        string clientId,
-        string clientSecret,
-        string refreshToken,
-        string senderEmail,
-        string? recipientName = null)
+        string? recipientName = null,
+        string[]? tags = null)
     {
-        var accessToken = await GetGmailAccessTokenAsync(clientId, clientSecret, refreshToken);
+        var apiKey = _configuration["Brevo:ApiKey"]
+            ?? _configuration["Brevo__ApiKey"]
+            ?? Environment.GetEnvironmentVariable("Brevo__ApiKey")
+            ?? Environment.GetEnvironmentVariable("Brevo:ApiKey");
 
-        var boundary = "----=_Part_" + Guid.NewGuid().ToString("N");
-        var dateHeader = DateTime.UtcNow.ToString("r");
-        var messageId = $"<{Guid.NewGuid():N}.{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}@{senderEmail.Split('@')[1]}>";
-
-        var formattedTo = !string.IsNullOrWhiteSpace(recipientName)
-            ? $"{EncodeHeaderValue(recipientName.Trim())} <{toEmail}>"
-            : toEmail;
-
-        var sb = new StringBuilder();
-        sb.Append($"From: Marshmallow <{senderEmail}>\r\n");
-        sb.Append($"To: {formattedTo}\r\n");
-        sb.Append($"Subject: {EncodeHeaderValue(subject)}\r\n");
-        sb.Append($"Date: {dateHeader}\r\n");
-        sb.Append($"Message-ID: {messageId}\r\n");
-        sb.Append("MIME-Version: 1.0\r\n");
-        sb.Append($"Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n");
-
-        // Part 1: Plain-Text (RFC standard for anti-spam deliverability)
-        sb.Append($"--{boundary}\r\n");
-        sb.Append("Content-Type: text/plain; charset=utf-8\r\n");
-        sb.Append("Content-Transfer-Encoding: 8bit\r\n\r\n");
-        sb.Append(plainTextContent + "\r\n\r\n");
-
-        // Part 2: HTML
-        sb.Append($"--{boundary}\r\n");
-        sb.Append("Content-Type: text/html; charset=utf-8\r\n");
-        sb.Append("Content-Transfer-Encoding: 8bit\r\n\r\n");
-        sb.Append(htmlContent + "\r\n\r\n");
-
-        sb.Append($"--{boundary}--\r\n");
-
-        var rawBytes = Encoding.UTF8.GetBytes(sb.ToString());
-        var base64Url = Convert.ToBase64String(rawBytes)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
-
-        var payload = JsonSerializer.Serialize(new { raw = base64Url });
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
-        };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
-
-        using var response = await _httpClient.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
-        {
-            var err = await response.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"Gmail API error ({response.StatusCode}): {err}");
+            throw new InvalidOperationException("Brevo API key is not configured. Please set Brevo:ApiKey or Brevo__ApiKey.");
         }
 
-        _logger.LogInformation("Email successfully delivered to {Email} via Google Gmail REST API.", toEmail);
-    }
-
-    private async Task SendEmailAsync(string toEmail, string subject, string htmlContent, string plainTextContent, string? recipientName = null)
-    {
-        var gmailClientId = _configuration["Gmail:ClientId"]
-            ?? _configuration["Gmail__ClientId"]
-            ?? Environment.GetEnvironmentVariable("Gmail__ClientId")
-            ?? Environment.GetEnvironmentVariable("Gmail:ClientId");
-
-        var gmailClientSecret = _configuration["Gmail:ClientSecret"]
-            ?? _configuration["Gmail__ClientSecret"]
-            ?? Environment.GetEnvironmentVariable("Gmail__ClientSecret")
-            ?? Environment.GetEnvironmentVariable("Gmail:ClientSecret");
-
-        var gmailRefreshToken = _configuration["Gmail:RefreshToken"]
-            ?? _configuration["Gmail__RefreshToken"]
-            ?? Environment.GetEnvironmentVariable("Gmail__RefreshToken")
-            ?? Environment.GetEnvironmentVariable("Gmail:RefreshToken");
-
-        var gmailSenderEmail = _configuration["Gmail:SenderEmail"]
-            ?? _configuration["Gmail__SenderEmail"]
-            ?? Environment.GetEnvironmentVariable("Gmail__SenderEmail")
+        var senderEmail = _configuration["Brevo:SenderEmail"]
+            ?? _configuration["Brevo__SenderEmail"]
+            ?? Environment.GetEnvironmentVariable("Brevo__SenderEmail")
+            ?? Environment.GetEnvironmentVariable("Brevo:SenderEmail")
             ?? "maroo30303030@gmail.com";
 
-        // Priority 1: Google Gmail REST API (HTTPS port 443 -> Works on Render Free Tier + Lands 100% in Primary Inbox)
-        if (!string.IsNullOrWhiteSpace(gmailClientId) &&
-            !string.IsNullOrWhiteSpace(gmailClientSecret) &&
-            !string.IsNullOrWhiteSpace(gmailRefreshToken))
-        {
-            try
-            {
-                _logger.LogInformation("Dispatching email to {Email} via Google Gmail REST API (Port 443)...", toEmail);
-                await SendViaGmailApiAsync(toEmail, subject, htmlContent, plainTextContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail, recipientName);
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Gmail REST API dispatch failed for {Email}. Falling back to next email channel...", toEmail);
-            }
-        }
-
-        var smtpPassword = _configuration["Smtp:AppPassword"];
-        var smtpEmail = _configuration["Smtp:SenderEmail"] ?? "maroo30303030@gmail.com";
-        var smtpHost = _configuration["Smtp:Host"] ?? "smtp.gmail.com";
-        var smtpPort = int.TryParse(_configuration["Smtp:Port"], out var port) ? port : 587;
-
-        var isRender = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER"));
-
-        // Priority 2: Google Direct SMTP (Port 587) - Skip on Render Free Tier where SMTP is blocked
-        if (!isRender && !string.IsNullOrWhiteSpace(smtpPassword))
-        {
-            try
-            {
-                var cleanPassword = smtpPassword.Replace(" ", "").Trim();
-                _logger.LogInformation(
-                    "Dispatching email to {Email} via Google Direct SMTP ({Host}:{Port})...",
-                    toEmail, smtpHost, smtpPort);
-
-                using var client = new SmtpClient(smtpHost, smtpPort)
-                {
-                    EnableSsl = true,
-                    Credentials = new NetworkCredential(smtpEmail, cleanPassword),
-                    Timeout = 5000
-                };
-
-                using var mail = new MailMessage
-                {
-                    From = new MailAddress(smtpEmail, "Marshmallow"),
-                    Subject = subject,
-                    Body = htmlContent,
-                    IsBodyHtml = true
-                };
-                mail.To.Add(toEmail);
-
-                mail.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(plainTextContent, Encoding.UTF8, "text/plain"));
-                mail.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(htmlContent, Encoding.UTF8, "text/html"));
-
-                await client.SendMailAsync(mail).WaitAsync(TimeSpan.FromSeconds(5));
-                _logger.LogInformation("Email successfully delivered to {Email} via Google SMTP.", toEmail);
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Google SMTP failed or timed out for {Email}. Falling back to Brevo HTTP API...",
-                    toEmail);
-            }
-        }
-
-        _logger.LogInformation(
-            isRender
-                ? "Running on Render: SMTP port 587 blocked by cloud firewall. Using Brevo HTTP API (Port 443) for {Email}..."
-                : "Dispatching email to {Email} via Brevo HTTP API (Port 443)...",
-            toEmail);
-
-        // Priority 3: Brevo REST API (HTTPS Port 443 fallback)
-        var apiKey = _configuration["Brevo:ApiKey"]
-                       ?? throw new InvalidOperationException("Neither Gmail API, SMTP, nor Brevo API is configured.");
+        var senderName = _configuration["Brevo:SenderName"]
+            ?? _configuration["Brevo__SenderName"]
+            ?? Environment.GetEnvironmentVariable("Brevo__SenderName")
+            ?? Environment.GetEnvironmentVariable("Brevo:SenderName")
+            ?? "Marshmallow";
 
         var emailData = new
         {
             sender = new
             {
-                name = "Marshmallow",
-                email = "maroo30303030@gmail.com"
+                name = senderName,
+                email = senderEmail
             },
             to = new[]
             {
@@ -442,9 +243,15 @@ public class BrevoEmailSender : IBrevoEmailSender
                     name = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : "Marshmallow User"
                 }
             },
+            replyTo = new
+            {
+                email = senderEmail,
+                name = senderName
+            },
             subject,
             htmlContent,
-            textContent = plainTextContent
+            textContent = plainTextContent,
+            tags = tags ?? ["transactional"]
         };
 
         var json = JsonSerializer.Serialize(emailData);
@@ -458,9 +265,10 @@ public class BrevoEmailSender : IBrevoEmailSender
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync();
-            throw new Exception($"Brevo API error: {error}");
+            _logger.LogError("Brevo API delivery failed for {Email}: {StatusCode} - {Error}", toEmail, response.StatusCode, error);
+            throw new InvalidOperationException($"Brevo API error ({response.StatusCode}): {error}");
         }
 
-        _logger.LogInformation("Email successfully delivered to {Email} via Brevo HTTP API.", toEmail);
+        _logger.LogInformation("Email successfully delivered to {Email} via Brevo HTTP API (Tags: {Tags}).", toEmail, string.Join(", ", tags ?? ["transactional"]));
     }
 }
