@@ -32,35 +32,20 @@ public class BrevoEmailSender : IBrevoEmailSender
         var bodyText = $"Hi {greetingName},\n\n" +
                        $"Your Marshmallow verification code is:\n\n" +
                        $"{code}\n\n" +
-                       $"Enter this 6-digit code on the verification screen to activate your account.\n" +
-                       $"This code will expire in 15 minutes.\n\n" +
+                       $"Enter this code on the verification screen to activate your account. It will expire in 15 minutes.\n\n" +
                        $"If you didn't request this code, you can safely ignore this email.\n";
 
         var htmlContent = $@"<!DOCTYPE html>
-<html lang=""en"">
+<html>
 <head>
-    <meta charset=""UTF-8"">
-    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-    <title>{code} is your Marshmallow verification code</title>
+    <meta charset=""utf-8"">
 </head>
-<body style=""margin: 0; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #FAFAFA; color: #111827;"">
-    <div style=""max-width: 460px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 32px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"">
-        <h2 style=""margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #111827;"">Confirm your email address</h2>
-        <p style=""margin: 0 0 24px; font-size: 15px; line-height: 1.5; color: #374151;"">
-            Hi {greetingName},<br><br>
-            Please enter the following 6-digit verification code to complete your Marshmallow registration:
-        </p>
-        <div style=""background-color: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px; padding: 20px; text-align: center; margin: 0 0 24px;"">
-            <span style=""font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 34px; font-weight: 700; letter-spacing: 8px; color: #111827;"">{code}</span>
-        </div>
-        <p style=""margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: #6B7280;"">
-            This code expires in 15 minutes. Never share this code with anyone.
-        </p>
-        <hr style=""border: none; border-top: 1px solid #E5E7EB; margin: 24px 0 16px;"" />
-        <p style=""margin: 0; font-size: 12px; line-height: 1.4; color: #9CA3AF;"">
-            If you didn't request a verification code, you can safely ignore this email.
-        </p>
-    </div>
+<body style=""font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #222222; font-size: 15px; line-height: 1.6; padding: 16px;"">
+    <p>Hi {greetingName},</p>
+    <p>Your Marshmallow verification code is:</p>
+    <p style=""font-size: 32px; font-weight: bold; letter-spacing: 6px; font-family: monospace; color: #111111; margin: 20px 0;"">{code}</p>
+    <p>Enter this code on the verification screen to activate your account. It will expire in 15 minutes.</p>
+    <p style=""color: #777777; font-size: 13px; margin-top: 32px;"">If you didn't request this code, you can safely ignore this email.</p>
 </body>
 </html>";
 
