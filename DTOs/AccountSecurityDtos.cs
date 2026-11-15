@@ -15,6 +15,15 @@ public class ChangePasswordDto
     public string? Code { get; set; }
 }
 
+public class ChangePasswordResponseDto
+{
+    [System.Text.Json.Serialization.JsonPropertyName("requiresOtp")]
+    public bool RequiresOtp { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+}
+
 public class DeleteAccountDto
 {
     [Required]
