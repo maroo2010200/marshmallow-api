@@ -34,12 +34,12 @@ public class BrevoEmailSender : IBrevoEmailSender
 
         var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : null;
         var subject = greetingName != null
-            ? $"{greetingName}, confirm your Marshmallow account 🔥"
-            : "Welcome to Marshmallow! Confirm your email";
+            ? $"{greetingName}, please confirm your Marshmallow account"
+            : "Confirm your Marshmallow account";
 
         var heading = greetingName != null
-            ? $"Welcome, {greetingName}! 🔥"
-            : "Welcome to Marshmallow! 🔥";
+            ? $"Welcome, {greetingName}!"
+            : "Welcome to Marshmallow!";
 
         var bodyHtml = greetingName != null
             ? $"Hi {greetingName},<br><br>Thanks for joining us! Please confirm your email address to complete your Marshmallow account setup."
@@ -65,7 +65,7 @@ public class BrevoEmailSender : IBrevoEmailSender
             ctaUrl: frontendVerificationUrl,
             footerText: "If you didn't create a Marshmallow account, you can safely ignore this email.");
 
-        await SendEmailAsync(email, subject, htmlContent, plainTextContent);
+        await SendEmailAsync(email, subject, htmlContent, plainTextContent, greetingName);
     }
 
     public async Task SendPasswordResetEmailAsync(int userId, string email, string resetToken, string? recipientName = null)
@@ -102,11 +102,23 @@ public class BrevoEmailSender : IBrevoEmailSender
             ctaUrl: frontendResetUrl,
             footerText: "If you didn't request a password reset, you can safely ignore this email.");
 
-        await SendEmailAsync(email, subject, htmlContent, plainTextContent);
+        await SendEmailAsync(email, subject, htmlContent, plainTextContent, greetingName);
     }
 
-    private string GetFrontendBaseUrl() =>
-        _configuration["Frontend:BaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+    private string GetFrontendBaseUrl()
+    {
+        var configured = _configuration["Frontend:BaseUrl"]
+            ?? _configuration["Frontend__BaseUrl"]
+            ?? Environment.GetEnvironmentVariable("Frontend__BaseUrl")
+            ?? Environment.GetEnvironmentVariable("Frontend:BaseUrl");
+
+        if (!string.IsNullOrWhiteSpace(configured) && !configured.Contains("localhost"))
+        {
+            return configured.TrimEnd('/');
+        }
+
+        return "https://marshmallow-react.vercel.app";
+    }
 
     private static string BuildPlainText(
         string heading,
@@ -242,6 +254,14 @@ public class BrevoEmailSender : IBrevoEmailSender
         }
     }
 
+    private static string EncodeHeaderValue(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        if (value.All(c => c <= 127)) return value;
+        var bytes = Encoding.UTF8.GetBytes(value);
+        return $"=?utf-8?B?{Convert.ToBase64String(bytes)}?=";
+    }
+
     private async Task SendViaGmailApiAsync(
         string toEmail,
         string subject,
@@ -250,7 +270,8 @@ public class BrevoEmailSender : IBrevoEmailSender
         string clientId,
         string clientSecret,
         string refreshToken,
-        string senderEmail)
+        string senderEmail,
+        string? recipientName = null)
     {
         var accessToken = await GetGmailAccessTokenAsync(clientId, clientSecret, refreshToken);
 
@@ -258,14 +279,17 @@ public class BrevoEmailSender : IBrevoEmailSender
         var dateHeader = DateTime.UtcNow.ToString("r");
         var messageId = $"<{Guid.NewGuid():N}.{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}@{senderEmail.Split('@')[1]}>";
 
+        var formattedTo = !string.IsNullOrWhiteSpace(recipientName)
+            ? $"{EncodeHeaderValue(recipientName.Trim())} <{toEmail}>"
+            : toEmail;
+
         var sb = new StringBuilder();
         sb.Append($"From: Marshmallow <{senderEmail}>\r\n");
-        sb.Append($"To: {toEmail}\r\n");
-        sb.Append($"Subject: {subject}\r\n");
+        sb.Append($"To: {formattedTo}\r\n");
+        sb.Append($"Subject: {EncodeHeaderValue(subject)}\r\n");
         sb.Append($"Date: {dateHeader}\r\n");
         sb.Append($"Message-ID: {messageId}\r\n");
         sb.Append("MIME-Version: 1.0\r\n");
-        sb.Append("X-Mailer: Marshmallow Mailer\r\n");
         sb.Append($"Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n");
 
         // Part 1: Plain-Text (RFC standard for anti-spam deliverability)
@@ -305,7 +329,7 @@ public class BrevoEmailSender : IBrevoEmailSender
         _logger.LogInformation("Email successfully delivered to {Email} via Google Gmail REST API.", toEmail);
     }
 
-    private async Task SendEmailAsync(string toEmail, string subject, string htmlContent, string plainTextContent)
+    private async Task SendEmailAsync(string toEmail, string subject, string htmlContent, string plainTextContent, string? recipientName = null)
     {
         var gmailClientId = _configuration["Gmail:ClientId"]
             ?? _configuration["Gmail__ClientId"]
@@ -335,7 +359,7 @@ public class BrevoEmailSender : IBrevoEmailSender
             try
             {
                 _logger.LogInformation("Dispatching email to {Email} via Google Gmail REST API (Port 443)...", toEmail);
-                await SendViaGmailApiAsync(toEmail, subject, htmlContent, plainTextContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail);
+                await SendViaGmailApiAsync(toEmail, subject, htmlContent, plainTextContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail, recipientName);
                 return;
             }
             catch (Exception ex)
@@ -412,10 +436,15 @@ public class BrevoEmailSender : IBrevoEmailSender
             },
             to = new[]
             {
-                new { email = toEmail, name = "Marshmallow User" }
+                new
+                {
+                    email = toEmail,
+                    name = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : "Marshmallow User"
+                }
             },
             subject,
-            htmlContent
+            htmlContent,
+            textContent = plainTextContent
         };
 
         var json = JsonSerializer.Serialize(emailData);
