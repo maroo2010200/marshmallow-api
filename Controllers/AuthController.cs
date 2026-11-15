@@ -182,6 +182,37 @@ public class AuthController(
         });
     }
 
+    [HttpPost("verify-code")]
+    public async Task<ActionResult> VerifyCode([FromBody] VerifyCodeDto dto)
+    {
+        var userId = await _emailVerificationService.VerifyCodeAsync(dto.Email, dto.Code);
+
+        if (userId == null)
+        {
+            _logger.LogSecurityWarning("EmailVerificationCodeFailed", null, null, "Auth", dto.Email, "Invalid or expired verification code");
+            return BadRequest(new { message = "Invalid or expired verification code." });
+        }
+
+        var user = await _dbContext.Users.FindAsync(userId);
+        if (user == null)
+        {
+            return BadRequest(new { message = "User not found." });
+        }
+
+        await _cache.RemoveByTagAsync($"user-{userId}");
+
+        var (Token, ExpiresAt) = _jwtService.GenerateToken(user);
+
+        _logger.LogUserAction("EmailVerifiedWithCode", user.Id, user.Username, "User", user.Id);
+
+        return Ok(new
+        {
+            token = Token,
+            expiresAt = ExpiresAt,
+            user = UserResponseDto.FromUser(user, isOwner: true)
+        });
+    }
+
     [HttpPost("resend-verification")]
     [EnableRateLimiting("resend-verification-policy")]
     public async Task<ActionResult> ResendVerificationEmail([FromQuery] string email)

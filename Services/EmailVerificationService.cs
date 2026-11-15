@@ -15,12 +15,13 @@ public class EmailVerificationService(AppDbContext dbContext, IBrevoEmailSender 
             .Where(v => v.UserId == userId && v.ExpiresAt <= DateTime.UtcNow)
             .ExecuteDeleteAsync();
 
-        var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+        // Cryptographically secure 6-digit OTP code (100000 - 999999)
+        var token = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         var verification = new EmailVerification
         {
             UserId = userId,
             Token = token,
-            ExpiresAt = DateTime.UtcNow.AddHours(24),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(15),
             IsUsed = false
         };
         _dbContext.EmailVerifications.Add(verification);
@@ -55,6 +56,35 @@ public class EmailVerificationService(AppDbContext dbContext, IBrevoEmailSender 
 
         var user = await _dbContext.Users.FindAsync(verification.UserId);
         if (user == null) return null;
+
+        user.IsEmailVerified = true;
+        verification.IsUsed = true;
+        user.VerifiedAt = DateTime.UtcNow;
+        user.VerificationToken = null;
+
+        await _dbContext.SaveChangesAsync();
+        return user.Id;
+    }
+
+    public async Task<int?> VerifyCodeAsync(string email, string code)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+        var normalizedCode = code.Trim();
+
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
+        if (user == null) return null;
+
+        var verification = await _dbContext.EmailVerifications
+            .Where(v => v.UserId == user.Id && v.Token == normalizedCode && !v.IsUsed && v.ExpiresAt > DateTime.UtcNow)
+            .OrderByDescending(v => v.ExpiresAt)
+            .FirstOrDefaultAsync();
+
+        if (verification == null) return null;
 
         user.IsEmailVerified = true;
         verification.IsUsed = true;
