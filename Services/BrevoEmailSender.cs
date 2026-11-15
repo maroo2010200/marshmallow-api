@@ -93,14 +93,13 @@ public class BrevoEmailSender : IBrevoEmailSender
     {
         var cleanCode = code.Trim();
         var greetingName = !string.IsNullOrWhiteSpace(recipientName) ? recipientName.Trim() : "there";
-        var subject = $"{cleanCode} is your Marshmallow security code";
+        var subject = $"{cleanCode} is your Marshmallow verification code";
 
         var bodyText = $"Hi {greetingName},\n\n" +
-                       $"We received a request to change the password for your Marshmallow account.\n\n" +
-                       $"Your verification code is:\n\n" +
+                       $"Your Marshmallow verification code is:\n\n" +
                        $"{cleanCode}\n\n" +
-                       $"Enter this code on the screen to confirm your new password. It will expire in 15 minutes.\n\n" +
-                       $"If you did not request this change, please change your password immediately or contact support.\n";
+                       $"Enter this code to confirm your password change. It will expire in 15 minutes.\n\n" +
+                       $"If you didn't request this code, you can safely ignore this email.\n";
 
         var htmlContent = $@"<!DOCTYPE html>
 <html>
@@ -109,15 +108,14 @@ public class BrevoEmailSender : IBrevoEmailSender
 </head>
 <body style=""font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #222222; font-size: 15px; line-height: 1.6; padding: 16px;"">
     <p>Hi {greetingName},</p>
-    <p>We received a request to change your Marshmallow account password.</p>
-    <p>Your verification code is:</p>
+    <p>Your Marshmallow verification code is:</p>
     <p style=""font-size: 32px; font-weight: bold; letter-spacing: 6px; font-family: monospace; color: #111111; margin: 20px 0;"">{cleanCode}</p>
-    <p>Enter this code on the screen to confirm your new password. It will expire in 15 minutes.</p>
-    <p style=""color: #777777; font-size: 13px; margin-top: 32px;"">If you didn't request this change, please secure your account immediately.</p>
+    <p>Enter this code to confirm your password change. It will expire in 15 minutes.</p>
+    <p style=""color: #777777; font-size: 13px; margin-top: 32px;"">If you didn't request this code, you can safely ignore this email.</p>
 </body>
 </html>";
 
-        await SendEmailAsync(email, subject, htmlContent, bodyText, recipientName, ["security-otp"]);
+        await SendEmailAsync(email, subject, htmlContent, bodyText, recipientName, ["otp-verification"]);
     }
 
     private string GetFrontendBaseUrl()
@@ -421,6 +419,27 @@ public class BrevoEmailSender : IBrevoEmailSender
         string? recipientName = null,
         string[]? tags = null)
     {
+        var apiKey = _configuration["Brevo:ApiKey"]
+            ?? _configuration["Brevo__ApiKey"]
+            ?? Environment.GetEnvironmentVariable("Brevo__ApiKey")
+            ?? Environment.GetEnvironmentVariable("Brevo:ApiKey");
+
+        // Priority 1: Brevo HTTP API (Dedicated transactional provider with authenticated DKIM/SPF)
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            try
+            {
+                _logger.LogInformation("Dispatching email to {Email} via Brevo HTTP API (Port 443)...", toEmail);
+                await SendViaBrevoApiAsync(toEmail, subject, htmlContent, plainTextContent, recipientName, tags);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Brevo HTTP API dispatch failed for {Email}. Falling back to Google Gmail REST API...", toEmail);
+            }
+        }
+
+        // Priority 2: Google Gmail REST API (Fallback)
         var gmailClientId = _configuration["Gmail:ClientId"]
             ?? _configuration["Gmail__ClientId"]
             ?? Environment.GetEnvironmentVariable("Gmail__ClientId")
@@ -441,25 +460,15 @@ public class BrevoEmailSender : IBrevoEmailSender
             ?? Environment.GetEnvironmentVariable("Gmail__SenderEmail")
             ?? "maroo30303030@gmail.com";
 
-        // Priority 1: Google Gmail REST API (Direct Google DKIM/SPF from authentic @gmail.com)
         if (!string.IsNullOrWhiteSpace(gmailClientId) &&
             !string.IsNullOrWhiteSpace(gmailClientSecret) &&
             !string.IsNullOrWhiteSpace(gmailRefreshToken))
         {
-            try
-            {
-                _logger.LogInformation("Dispatching email to {Email} via Google Gmail REST API (Port 443)...", toEmail);
-                await SendViaGmailApiAsync(toEmail, subject, htmlContent, plainTextContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail, recipientName);
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Gmail REST API dispatch failed for {Email}. Falling back to Brevo HTTP API...", toEmail);
-            }
+            _logger.LogInformation("Dispatching email to {Email} via Google Gmail REST API (Port 443)...", toEmail);
+            await SendViaGmailApiAsync(toEmail, subject, htmlContent, plainTextContent, gmailClientId, gmailClientSecret, gmailRefreshToken, gmailSenderEmail, recipientName);
+            return;
         }
 
-        // Priority 2: Brevo HTTP API (Fallback)
-        _logger.LogInformation("Dispatching email to {Email} via Brevo HTTP API (Port 443)...", toEmail);
-        await SendViaBrevoApiAsync(toEmail, subject, htmlContent, plainTextContent, recipientName, tags);
+        throw new InvalidOperationException("No email provider (Brevo API or Gmail API) is configured.");
     }
 }
